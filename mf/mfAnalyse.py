@@ -3,17 +3,8 @@ import pandas as pd
 import os
 from helper.dataAPI import *
 from helper.folderAPI import *
+from mf.mfutil import *
 
-def max_abs_change(row, fund_trend_matrix):
-    if row.name in fund_trend_matrix.index:
-        other_value = fund_trend_matrix.loc[row.name, 'share_change']
-        return max(abs(row['share_change']), abs(other_value)) * (
-            1 if abs(row['share_change']) >= abs(other_value)
-            else (1 if other_value > 0 else -1)
-        )
-    else:
-        return row['share_change']
-    
 def record_immediate_sells(fund_id, stock_name, shares_change, action_type):
     """Record immediate sells/exits to a separate file"""
     date_str = dt.datetime.now().strftime("%Y-%m-%d")
@@ -103,16 +94,15 @@ def analyze_monthly_trends(holdings_list):
             if curr_shares > 0 and nxt_shares > 0:
                 # Both months have position
                 share_change_pct = (curr_shares - nxt_shares) / nxt_shares * 100
-                if share_change_pct >= 5:  # Significant increase (5% or more)
-                    trend_matrix.loc[stock, 'trend_score'] += 1.0
-                elif share_change_pct <= -5:  # Significant decrease (5% or more)
-                    trend_matrix.loc[stock, 'trend_score'] -= 1.0
+                if abs(share_change_pct) >= 5:  # Only consider significant changes
+                    score_change = get_change_score(share_change_pct)
+                    trend_matrix.loc[stock, 'trend_score'] += score_change
             elif curr_shares > 0 and nxt_shares == 0:
                 # New position or complete addition
-                trend_matrix.loc[stock, 'trend_score'] += 2.0
+                trend_matrix.loc[stock, 'trend_score'] += 100.0
             elif curr_shares == 0 and nxt_shares > 0:
                 # Complete exit
-                trend_matrix.loc[stock, 'trend_score'] -= 2.0
+                trend_matrix.loc[stock, 'trend_score'] -= 100.0
             
             # Store most recent shares and change
             if i == 0:
