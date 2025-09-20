@@ -1,68 +1,9 @@
 import datetime as dt
-import mstarpy as ms
 import pandas as pd
 import os
-from collections import defaultdict
-
-def get_fund_holdings(fund_ids):
-    """Fetch holdings data for multiple funds"""
-    holdings_data = []
-    
-    for fund_id in fund_ids:
-        try:
-            fund = ms.Funds(fund_id).position()
-            fund_name = fund_id
-            
-            for holding in fund["equityHoldingPage"]["holdingList"]:
-                holdings_data.append({
-                    'fund_id': fund_id,
-                    'fund_name': fund_name,
-                    'security_name': holding['securityName'],
-                    'isin': holding.get('isin', ''),
-                    'number_of_shares': float(holding['numberOfShare'] or 0.0),
-                    'share_change': float(holding.get('shareChange', 0.0) or 0.0),
-                    'sector': holding.get('sector', '')
-                })
-                
-        except Exception as e:
-            print(f"Error processing fund {fund_id}: {str(e)}")
-            
-    return pd.DataFrame(holdings_data)
-
-def create_directory_structure(base_dir="fund_data"):
-    """Create directory structure for storing fund data"""
-    directories = {
-        "holdings": os.path.join(base_dir, "holdings"),
-        "analysis": os.path.join(base_dir, "analysis")
-    }
-    
-    for dir_path in directories.values():
-        os.makedirs(dir_path, exist_ok=True)
-    
-    return directories
-
-def store_fund_holdings(fund_id, holdings_df, dirs):
-    """Store holdings data for a specific fund"""
-    date_str = dt.datetime.now().strftime("%Y-%m")
-    fund_dir = os.path.join(dirs["holdings"], fund_id)
-    os.makedirs(fund_dir, exist_ok=True)
-    
-    file_path = os.path.join(fund_dir, f"holdings_{date_str}.csv")
-    holdings_df.to_csv(file_path, index=False)
-    return file_path
-
-def collect_fund_data(fund_ids):
-    """Collect and store latest fund holdings data"""
-    dirs = create_directory_structure()
-    
-    for fund_id in fund_ids:
-        try:
-            holdings = get_fund_holdings([fund_id])
-            store_fund_holdings(fund_id, holdings, dirs)
-            print(f"Successfully collected data for fund: {fund_id}")
-        except Exception as e:
-            print(f"Error collecting data for fund {fund_id}: {str(e)}")
-       
+from helper.dataAPI import *
+from helper.folderAPI import *
+  
 def analyze_monthly_trends(holdings_list):
     """
     Analyze month-to-month trends for each stock using share count
@@ -294,19 +235,3 @@ def analyze_all_funds(fund_ids, considered_months):
 
     return fund_trends, consolidated_trends
 
-if __name__ == "__main__":
-    fund_ids = ["INF846K01K35", "INF0QA701BK8", "INF761K01EP7", 
-                "INF740K01QD1", "INF205K013T3"]
-    
-    import sys
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "collect":
-            collect_fund_data(fund_ids)
-        elif sys.argv[1] == "analyze":
-            # Get number of months to consider (default to 2 if not specified)
-            considered_months = int(sys.argv[2]) if len(sys.argv) > 2 else 2
-            analyze_all_funds(fund_ids, considered_months)
-        else:
-            print("Invalid argument. Use 'collect' or 'analyze [months]'")
-    else:
-        print("Please specify operation: collect or analyze [months]")
