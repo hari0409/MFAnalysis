@@ -3,6 +3,39 @@ import pandas as pd
 import os
 from helper.dataAPI import *
 from helper.folderAPI import *
+
+def max_abs_change(row, fund_trend_matrix):
+    if row.name in fund_trend_matrix.index:
+        other_value = fund_trend_matrix.loc[row.name, 'share_change']
+        return max(abs(row['share_change']), abs(other_value)) * (
+            1 if abs(row['share_change']) >= abs(other_value)
+            else (1 if other_value > 0 else -1)
+        )
+    else:
+        return row['share_change']
+    
+def record_immediate_sells(fund_id, stock_name, shares_change, action_type):
+    """Record immediate sells/exits to a separate file"""
+    date_str = dt.datetime.now().strftime("%Y-%m-%d")
+    immediate_sells_file = os.path.join("fund_data", "analysis", "immediate_sells.csv")
+    
+    # Create DataFrame for new entry
+    new_entry = pd.DataFrame({
+        'date': [date_str],
+        'fund_id': [fund_id],
+        'stock': [stock_name],
+        'action': [action_type],
+        'shares_change': [abs(shares_change)]
+    })
+    
+    # Append or create file
+    if os.path.exists(immediate_sells_file):
+        existing_data = pd.read_csv(immediate_sells_file)
+        updated_data = pd.concat([existing_data, new_entry], ignore_index=True)
+    else:
+        updated_data = new_entry
+    
+    updated_data.to_csv(immediate_sells_file, index=False)
   
 def analyze_monthly_trends(holdings_list):
     """
@@ -47,6 +80,21 @@ def analyze_monthly_trends(holdings_list):
             curr_shares = current_shares.get(stock, 0.0)
             nxt_shares = next_shares.get(stock, 0.0)
             
+            if curr_shares != nxt_shares:
+                trend_matrix.loc[stock, 'has_changes'] = True
+            
+            # Check for sells/exits and record them
+            if curr_shares < nxt_shares:
+                action_type = 'decrease' if curr_shares > 0 else 'exit'
+                shares_change = nxt_shares - curr_shares
+                record_immediate_sells(
+                    fund_id=holdings_list[i]['fund_id'].iloc[0],
+                    stock_name=stock,
+                    shares_change=shares_change,
+                    action_type=action_type
+                )
+            
+            
             # Update appearances count
             if curr_shares > 0 or nxt_shares > 0:
                 trend_matrix.loc[stock, 'appearances'] += 1
@@ -74,16 +122,6 @@ def analyze_monthly_trends(holdings_list):
                     trend_matrix.loc[stock, 'share_change'] = change_pct
     
     return trend_matrix
-
-def max_abs_change(row, fund_trend_matrix):
-    if row.name in fund_trend_matrix.index:
-        other_value = fund_trend_matrix.loc[row.name, 'share_change']
-        return max(abs(row['share_change']), abs(other_value)) * (
-            1 if abs(row['share_change']) >= abs(other_value)
-            else (1 if other_value > 0 else -1)
-        )
-    else:
-        return row['share_change']
 
 def analyze_all_funds(fund_ids, considered_months):
     """Analyze holdings changes for all funds using share-based analysis"""
