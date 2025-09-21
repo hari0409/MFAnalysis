@@ -103,16 +103,16 @@ def analyze_monthly_trends(holdings_list):
             if curr_shares > 0 and nxt_shares > 0:
                 # Both months have position
                 share_change_pct = (curr_shares - nxt_shares) / nxt_shares * 100
-                if share_change_pct >= 5:  # Significant increase (5% or more)
-                    trend_matrix.loc[stock, 'trend_score'] += 1.0
-                elif share_change_pct <= -5:  # Significant decrease (5% or more)
-                    trend_matrix.loc[stock, 'trend_score'] -= 1.0
+                # if share_change_pct >= 5:  # Significant increase (5% or more)
+                #     trend_matrix.loc[stock, 'trend_score'] += 1.0
+                # elif share_change_pct <= -5:  # Significant decrease (5% or more)
+                #     trend_matrix.loc[stock, 'trend_score'] -= 1.0
             elif curr_shares > 0 and nxt_shares == 0:
                 # New position or complete addition
-                trend_matrix.loc[stock, 'trend_score'] += 2.0
+                trend_matrix.loc[stock, 'trend_score'] += 1.0
             elif curr_shares == 0 and nxt_shares > 0:
                 # Complete exit
-                trend_matrix.loc[stock, 'trend_score'] -= 2.0
+                trend_matrix.loc[stock, 'trend_score'] -= 1.0
             
             # Store most recent shares and change
             if i == 0:
@@ -272,4 +272,3 @@ def analyze_all_funds(fund_ids, considered_months):
         print("❌ No fund had sufficient data for analysis")
 
     return fund_trends, consolidated_trends
-
