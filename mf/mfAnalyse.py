@@ -188,6 +188,22 @@ def analyze_all_funds(fund_ids, considered_months):
                 consolidated_trends['funds'] = funds_col
                 consolidated_trends['funds_entered'] = funds_entered_col
                 consolidated_trends['funds_exited'] = funds_exited_col
+                # initialize counts for averaging current_shares and share_change
+                # count a fund for a stock if that fund had appearances > 0 for that stock
+                cs_count = []
+                sc_count = []
+                for stock in consolidated_trends.index:
+                    ap = consolidated_trends.at[stock, 'appearances']
+                    # current_shares count: include if fund had the stock
+                    # share_change count: include only if there was a non-zero share_change
+                    try:
+                        sc_val = float(consolidated_trends.at[stock, 'share_change'])
+                    except Exception:
+                        sc_val = 0.0
+                    cs_count.append(1 if ap > 0 else 0)
+                    sc_count.append(1 if abs(sc_val) > 0 else 0)
+                consolidated_trends['current_shares_count'] = cs_count
+                consolidated_trends['share_change_count'] = sc_count
             else:
                 # Add new stocks to consolidated trends
                 new_stocks = set(fund_trend_matrix.index) - set(consolidated_trends.index)
@@ -202,6 +218,9 @@ def analyze_all_funds(fund_ids, considered_months):
                     new_rows['funds'] = [set() for _ in range(len(new_rows))]
                     new_rows['funds_entered'] = [set() for _ in range(len(new_rows))]
                     new_rows['funds_exited'] = [set() for _ in range(len(new_rows))]
+                    # initialize counts for averaging
+                    new_rows['current_shares_count'] = [0 for _ in range(len(new_rows))]
+                    new_rows['share_change_count'] = [0 for _ in range(len(new_rows))]
                     # Ensure dtype compatibility for numeric columns
                     for col in new_rows.columns:
                         if col not in ('funds', 'funds_entered', 'funds_exited'):
@@ -220,24 +239,57 @@ def analyze_all_funds(fund_ids, considered_months):
                     missing_rows['funds'] = [set() for _ in range(len(missing_rows))]
                     missing_rows['funds_entered'] = [set() for _ in range(len(missing_rows))]
                     missing_rows['funds_exited'] = [set() for _ in range(len(missing_rows))]
+                    missing_rows['current_shares_count'] = [0 for _ in range(len(missing_rows))]
+                    missing_rows['share_change_count'] = [0 for _ in range(len(missing_rows))]
                     for col in missing_rows.columns:
                         if col not in ('funds', 'funds_entered', 'funds_exited'):
                             missing_rows[col] = missing_rows[col].astype(consolidated_trends[col].dtype)
                     fund_trend_matrix = pd.concat([fund_trend_matrix, missing_rows])
 
                 # Update consolidated metrics
+                # Update aggregated numeric metrics
                 consolidated_trends['trend_score'] += fund_trend_matrix['trend_score']
                 consolidated_trends['appearances'] += fund_trend_matrix['appearances']
-                consolidated_trends['current_shares'] += fund_trend_matrix['current_shares']
 
-                # Update share_change with maximum absolute change and record fund contribution
+                # For current_shares and share_change, compute incremental averages across funds
                 for stock in consolidated_trends.index:
-                    existing = consolidated_trends.at[stock, 'share_change']
-                    new = fund_trend_matrix.at[stock, 'share_change']
-                    if abs(new) > abs(existing):
-                        consolidated_trends.at[stock, 'share_change'] = new
+                    # Update current_shares average if this fund had the stock (appearances > 0)
+                    try:
+                        fund_ap = int(fund_trend_matrix.at[stock, 'appearances'])
+                    except Exception:
+                        fund_ap = 0
+                    if fund_ap > 0:
+                        # current_shares average
+                        new_cs = float(fund_trend_matrix.at[stock, 'current_shares'])
+                        existing_cs = float(consolidated_trends.at[stock, 'current_shares'])
+                        if 'current_shares_count' in consolidated_trends.columns:
+                            try:
+                                existing_cs_count = int(consolidated_trends.at[stock, 'current_shares_count'])
+                            except Exception:
+                                existing_cs_count = 0
+                        else:
+                            existing_cs_count = 0
+                        updated_cs_count = existing_cs_count + 1
+                        updated_cs = (existing_cs * existing_cs_count + new_cs) / updated_cs_count if updated_cs_count > 0 else new_cs
+                        consolidated_trends.at[stock, 'current_shares'] = updated_cs
+                        consolidated_trends.at[stock, 'current_shares_count'] = updated_cs_count
 
-                    # If this fund contributed to trend_score or appearances, add it to the funds set
+                        # share_change average
+                        new_sc = float(fund_trend_matrix.at[stock, 'share_change'])
+                        existing_sc = float(consolidated_trends.at[stock, 'share_change'])
+                        if 'share_change_count' in consolidated_trends.columns:
+                            try:
+                                existing_sc_count = int(consolidated_trends.at[stock, 'share_change_count'])
+                            except Exception:
+                                existing_sc_count = 0
+                        else:
+                            existing_sc_count = 0
+                        updated_sc_count = existing_sc_count + 1
+                        updated_sc = (existing_sc * existing_sc_count + new_sc) / updated_sc_count if updated_sc_count > 0 else new_sc
+                        consolidated_trends.at[stock, 'share_change'] = updated_sc
+                        consolidated_trends.at[stock, 'share_change_count'] = updated_sc_count
+
+                    # If this fund contributed to trend_score or appearances, add it to the funds set and classify entered/exited
                     try:
                         contributed = (fund_trend_matrix.at[stock, 'trend_score'] != 0) or (fund_trend_matrix.at[stock, 'appearances'] != 0)
                     except Exception:
@@ -334,8 +386,6 @@ def analyze_all_funds(fund_ids, considered_months):
                         f.write(f"  * Found in {appearances:.0f} monthly reports\n")
                         if funds_list_str:
                             f.write(f"  * Funds: {funds_list_str}\n")
-                        if funds_list_str:
-                            f.write(f"  * Funds: {funds_list_str}\n")
                         if entered_list:
                             f.write(f"  * Funds Entered: {entered_list}\n")
                         if exited_list:
@@ -365,8 +415,6 @@ def analyze_all_funds(fund_ids, considered_months):
                         f.write(f"  * Score: {score:.1f}\n")
                         f.write(f"  * Current Shares: {shares:,.0f}\n")
                         f.write(f"  * Found in {appearances:.0f} monthly reports\n")
-                        if funds_list_str:
-                            f.write(f"  * Funds: {funds_list_str}\n")
                         if funds_list_str:
                             f.write(f"  * Funds: {funds_list_str}\n")
                         if entered_list:
