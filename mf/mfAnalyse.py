@@ -98,12 +98,14 @@ def analyze_monthly_trends(holdings_list):
             # Update appearances count
             if curr_shares > 0 or nxt_shares > 0:
                 trend_matrix.loc[stock, 'appearances'] += 1
-                
-            elif curr_shares > 0 and nxt_shares == 0:
-                # New position or complete addition
+
+            # Update trend score by direction of change between months
+            # (curr_shares is from the newer month, nxt_shares is from the older month)
+            if curr_shares > nxt_shares:
+                # Accumulation / increase
                 trend_matrix.loc[stock, 'trend_score'] += 1.0
-            elif curr_shares == 0 and nxt_shares > 0:
-                # Complete exit
+            elif curr_shares < nxt_shares:
+                # Reduction / sell
                 trend_matrix.loc[stock, 'trend_score'] -= 1.0
             
             # Store most recent shares and change
@@ -158,28 +160,69 @@ def analyze_all_funds(fund_ids, considered_months):
 
             # Update consolidated trends
             if consolidated_trends is None:
+                # Start consolidated trends and add a `funds` column (set of fund_ids that contributed)
                 consolidated_trends = fund_trend_matrix.copy()
+                # initialize funds as sets where this fund contributed (non-zero trend_score or appearances)
+                funds_col = []
+                funds_entered_col = []
+                funds_exited_col = []
+                for stock in consolidated_trends.index:
+                    ts = consolidated_trends.at[stock, 'trend_score']
+                    ap = consolidated_trends.at[stock, 'appearances']
+                    if (ts != 0) or (ap != 0):
+                        funds_col.append(set([fund_id]))
+                    else:
+                        funds_col.append(set())
+
+                    # classify entered vs exited by sign of trend_score
+                    if ts > 0:
+                        funds_entered_col.append(set([fund_id]))
+                    else:
+                        funds_entered_col.append(set())
+
+                    if ts < 0:
+                        funds_exited_col.append(set([fund_id]))
+                    else:
+                        funds_exited_col.append(set())
+
+                consolidated_trends['funds'] = funds_col
+                consolidated_trends['funds_entered'] = funds_entered_col
+                consolidated_trends['funds_exited'] = funds_exited_col
             else:
                 # Add new stocks to consolidated trends
                 new_stocks = set(fund_trend_matrix.index) - set(consolidated_trends.index)
                 if new_stocks:
+                    # Create new rows for stocks that exist in this fund but not in consolidated_trends
                     new_rows = pd.DataFrame(
                         0,
                         index=list(new_stocks),
-                        columns=consolidated_trends.columns
+                        columns=[c for c in consolidated_trends.columns if c not in ('funds', 'funds_entered', 'funds_exited')]
                     )
-                    new_rows = new_rows.astype(consolidated_trends.dtypes)
+                    # add empty funds sets for these new stocks
+                    new_rows['funds'] = [set() for _ in range(len(new_rows))]
+                    new_rows['funds_entered'] = [set() for _ in range(len(new_rows))]
+                    new_rows['funds_exited'] = [set() for _ in range(len(new_rows))]
+                    # Ensure dtype compatibility for numeric columns
+                    for col in new_rows.columns:
+                        if col not in ('funds', 'funds_entered', 'funds_exited'):
+                            new_rows[col] = new_rows[col].astype(consolidated_trends[col].dtype)
                     consolidated_trends = pd.concat([consolidated_trends, new_rows])
 
                 # Add missing stocks to current fund matrix
                 missing_in_fund = set(consolidated_trends.index) - set(fund_trend_matrix.index)
                 if missing_in_fund:
+                    # Add missing stocks into the current fund matrix with zeros and empty funds set
                     missing_rows = pd.DataFrame(
                         0,
                         index=list(missing_in_fund),
-                        columns=consolidated_trends.columns
+                        columns=[c for c in consolidated_trends.columns if c not in ('funds', 'funds_entered', 'funds_exited')]
                     )
-                    missing_rows = missing_rows.astype(consolidated_trends.dtypes)
+                    missing_rows['funds'] = [set() for _ in range(len(missing_rows))]
+                    missing_rows['funds_entered'] = [set() for _ in range(len(missing_rows))]
+                    missing_rows['funds_exited'] = [set() for _ in range(len(missing_rows))]
+                    for col in missing_rows.columns:
+                        if col not in ('funds', 'funds_entered', 'funds_exited'):
+                            missing_rows[col] = missing_rows[col].astype(consolidated_trends[col].dtype)
                     fund_trend_matrix = pd.concat([fund_trend_matrix, missing_rows])
 
                 # Update consolidated metrics
@@ -187,12 +230,44 @@ def analyze_all_funds(fund_ids, considered_months):
                 consolidated_trends['appearances'] += fund_trend_matrix['appearances']
                 consolidated_trends['current_shares'] += fund_trend_matrix['current_shares']
 
-                # Update share_change with maximum absolute change
+                # Update share_change with maximum absolute change and record fund contribution
                 for stock in consolidated_trends.index:
                     existing = consolidated_trends.at[stock, 'share_change']
                     new = fund_trend_matrix.at[stock, 'share_change']
                     if abs(new) > abs(existing):
                         consolidated_trends.at[stock, 'share_change'] = new
+
+                    # If this fund contributed to trend_score or appearances, add it to the funds set
+                    try:
+                        contributed = (fund_trend_matrix.at[stock, 'trend_score'] != 0) or (fund_trend_matrix.at[stock, 'appearances'] != 0)
+                    except Exception:
+                        contributed = False
+                    if contributed:
+                        # ensure the columns exist and are sets
+                        for col_name in ('funds', 'funds_entered', 'funds_exited'):
+                            if col_name not in consolidated_trends.columns:
+                                consolidated_trends[col_name] = [set() for _ in range(len(consolidated_trends))]
+
+                        if not isinstance(consolidated_trends.at[stock, 'funds'], set):
+                            existing_val = consolidated_trends.at[stock, 'funds']
+                            consolidated_trends.at[stock, 'funds'] = set(existing_val) if existing_val else set()
+                        consolidated_trends.at[stock, 'funds'].add(fund_id)
+
+                        # classify entered vs exited by the sign of the fund's trend_score for this stock
+                        try:
+                            sc = float(fund_trend_matrix.at[stock, 'trend_score'])
+                        except Exception:
+                            sc = 0.0
+                        if sc > 0:
+                            if not isinstance(consolidated_trends.at[stock, 'funds_entered'], set):
+                                val = consolidated_trends.at[stock, 'funds_entered']
+                                consolidated_trends.at[stock, 'funds_entered'] = set(val) if val else set()
+                            consolidated_trends.at[stock, 'funds_entered'].add(fund_id)
+                        elif sc < 0:
+                            if not isinstance(consolidated_trends.at[stock, 'funds_exited'], set):
+                                val = consolidated_trends.at[stock, 'funds_exited']
+                                consolidated_trends.at[stock, 'funds_exited'] = set(val) if val else set()
+                            consolidated_trends.at[stock, 'funds_exited'].add(fund_id)
 
         except Exception as e:
             print(f"❌ Error analyzing fund {fund_id}: {str(e)}")
@@ -208,10 +283,25 @@ def analyze_all_funds(fund_ids, considered_months):
 
         # Save consolidated trends and create summary report
         if consolidated_trends is not None:
-            # Save consolidated CSV
+            # Save consolidated CSV (convert funds sets to CSV-friendly strings)
             output_file = os.path.join(dirs["analysis"],
                                        f"consolidated_trends_{dateTime}.csv")
-            consolidated_trends.to_csv(output_file)
+            ct_for_save = consolidated_trends.copy()
+            def funds_to_str(x):
+                if isinstance(x, set):
+                    return ",".join(sorted(x)) if x else ""
+                # if it's list-like or already string
+                try:
+                    return ",".join(sorted(x))
+                except Exception:
+                    return str(x)
+            if 'funds' in ct_for_save.columns:
+                ct_for_save['funds'] = ct_for_save['funds'].apply(funds_to_str)
+            if 'funds_entered' in ct_for_save.columns:
+                ct_for_save['funds_entered'] = ct_for_save['funds_entered'].apply(funds_to_str)
+            if 'funds_exited' in ct_for_save.columns:
+                ct_for_save['funds_exited'] = ct_for_save['funds_exited'].apply(funds_to_str)
+            ct_for_save.to_csv(output_file)
 
             # Create summary markdown report
             summary_file = os.path.join(dirs["analysis"],
@@ -231,11 +321,25 @@ def analyze_all_funds(fund_ids, considered_months):
                         score = strong_positive.loc[stock, 'trend_score']
                         shares = strong_positive.loc[stock, 'current_shares']
                         change = strong_positive.loc[stock, 'share_change']
-                        funds = strong_positive.loc[stock, 'appearances']
+                        appearances = strong_positive.loc[stock, 'appearances']
+                        funds_set = consolidated_trends.loc[stock, 'funds'] if 'funds' in consolidated_trends.columns else None
+                        funds_list_str = ", ".join(sorted(funds_set)) if isinstance(funds_set, set) and funds_set else (str(funds_set) if funds_set else "")
+                        entered_set = consolidated_trends.loc[stock, 'funds_entered'] if 'funds_entered' in consolidated_trends.columns else None
+                        exited_set = consolidated_trends.loc[stock, 'funds_exited'] if 'funds_exited' in consolidated_trends.columns else None
+                        entered_list = ", ".join(sorted(entered_set)) if isinstance(entered_set, set) and entered_set else ""
+                        exited_list = ", ".join(sorted(exited_set)) if isinstance(exited_set, set) and exited_set else ""
                         f.write(f"- {stock}:\n")
                         f.write(f"  * Score: {score:.1f}\n")
                         f.write(f"  * Current Shares: {shares:,.0f}\n")
-                        f.write(f"  * Found in {funds:.0f} monthly reports\n")
+                        f.write(f"  * Found in {appearances:.0f} monthly reports\n")
+                        if funds_list_str:
+                            f.write(f"  * Funds: {funds_list_str}\n")
+                        if funds_list_str:
+                            f.write(f"  * Funds: {funds_list_str}\n")
+                        if entered_list:
+                            f.write(f"  * Funds Entered: {entered_list}\n")
+                        if exited_list:
+                            f.write(f"  * Funds Exited: {exited_list}\n")
                         if abs(change) > 0:
                             f.write(f"  * Maximum Change: {change:+.1f}%\n")
                         f.write("\n")
@@ -250,11 +354,25 @@ def analyze_all_funds(fund_ids, considered_months):
                         score = strong_negative.loc[stock, 'trend_score']
                         shares = strong_negative.loc[stock, 'current_shares']
                         change = strong_negative.loc[stock, 'share_change']
-                        funds = strong_negative.loc[stock, 'appearances']
+                        appearances = strong_negative.loc[stock, 'appearances']
+                        funds_set = consolidated_trends.loc[stock, 'funds'] if 'funds' in consolidated_trends.columns else None
+                        funds_list_str = ", ".join(sorted(funds_set)) if isinstance(funds_set, set) and funds_set else (str(funds_set) if funds_set else "")
+                        entered_set = consolidated_trends.loc[stock, 'funds_entered'] if 'funds_entered' in consolidated_trends.columns else None
+                        exited_set = consolidated_trends.loc[stock, 'funds_exited'] if 'funds_exited' in consolidated_trends.columns else None
+                        entered_list = ", ".join(sorted(entered_set)) if isinstance(entered_set, set) and entered_set else ""
+                        exited_list = ", ".join(sorted(exited_set)) if isinstance(exited_set, set) and exited_set else ""
                         f.write(f"- {stock}:\n")
                         f.write(f"  * Score: {score:.1f}\n")
                         f.write(f"  * Current Shares: {shares:,.0f}\n")
-                        f.write(f"  * Found in {funds:.0f} monthly reports\n")
+                        f.write(f"  * Found in {appearances:.0f} monthly reports\n")
+                        if funds_list_str:
+                            f.write(f"  * Funds: {funds_list_str}\n")
+                        if funds_list_str:
+                            f.write(f"  * Funds: {funds_list_str}\n")
+                        if entered_list:
+                            f.write(f"  * Funds Entered: {entered_list}\n")
+                        if exited_list:
+                            f.write(f"  * Funds Exited: {exited_list}\n")
                         if abs(change) > 0:
                             f.write(f"  * Maximum Change: {change:+.1f}%\n")
                         f.write("\n")
