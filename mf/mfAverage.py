@@ -3,7 +3,7 @@ import datetime as dt
 import pandas as pd
 import os
 
-def calculate_fund_averages(fund_ids, average_by_holders=False):
+def calculate_fund_averages(fund_ids, average_by_holders=False, group=None):
     """Calculate average weightage of stocks across all funds
 
     Args:
@@ -11,7 +11,7 @@ def calculate_fund_averages(fund_ids, average_by_holders=False):
         average_by_holders: if True, average only across funds that hold the stock
             (i.e., divide by num_funds_holding). If False, divide by total number of funds.
     """
-    dirs = create_directory_structure()
+    dirs = create_directory_structure(group=group)
     dateTime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
     # Get latest holdings from all funds
@@ -106,7 +106,7 @@ def calculate_average_weightage(holdings_df, total_funds, average_by_holders=Fal
     # Sort by average weight descending
     return avg_holdings.sort_values('avg_weight_pct', ascending=False)
 
-def compare_months(prev_month=None, curr_month=None, fund_ids=None, average_by_holders=False):
+def compare_months(prev_month=None, curr_month=None, fund_ids=None, average_by_holders=False, group=None):
     """
     Compare average allocations between two months.
 
@@ -117,7 +117,7 @@ def compare_months(prev_month=None, curr_month=None, fund_ids=None, average_by_h
 
     Produces a CSV in analysis/ with per-stock average change and lists of funds that increased/decreased allocation.
     """
-    dirs = create_directory_structure()
+    dirs = create_directory_structure(group=group)
     # helper to parse month input (accept 'YYYY-MM' or numeric month like '9' or 9)
     def _parse_month_arg(a):
         if a is None:

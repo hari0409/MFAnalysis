@@ -2,70 +2,78 @@ from mf.mfAnalyse import *
 from mf.mfCollect import *
 from mf.mfAverage import *
 import datetime as _dt
+import os
 
 if __name__ == "__main__":
-    fund_ids = ["INF194KB1AL4","INF966L01689","INF204K01K15","INF247L01BY3","INF179KA1RZ8","INF663L01W06","INF205K013T3","INF277K011O1","INF846K01K35","INF917K01QA1"]
-    
+    # default fund ids (will be overridden if a group is provided)
+    default_fund_ids = ["INF194KB1AL4","INF966L01689","INF204K01K15","INF247L01BY3","INF179KA1RZ8","INF663L01W06","INF205K013T3","INF277K011O1","INF846K01K35","INF917K01QA1"]
+
+    # load fund groups if present
+    groups_file = 'fund_groups.json'
+    group_map = {}
+    try:
+        import json
+        if os.path.exists(groups_file):
+            with open(groups_file, 'r') as gf:
+                group_map = json.load(gf)
+    except Exception:
+        group_map = {}
+
     import sys
-    if len(sys.argv) > 1:
-        if sys.argv[1] == "collect":
-            collect_fund_data(fund_ids)
-        elif sys.argv[1] == "analyze":
-            considered_months = int(sys.argv[2]) if len(sys.argv) > 2 else 2
-            analyze_all_funds(fund_ids, considered_months)
-        elif sys.argv[1] == "average":
+    # detect if first arg is a group name
+    selected_group = None
+    args = sys.argv[1:]
+    if len(args) >= 1 and args[0] in group_map:
+        selected_group = args[0]
+        fund_ids = group_map[selected_group]
+        # shift args so following parsing sees the command
+        args = args[1:]
+    else:
+        fund_ids = default_fund_ids
+
+    if len(args) > 0:
+        cmd = args[0]
+        # remaining args for command handlers
+        cmd_args = args[1:]
+        if cmd == "collect":
+            collect_fund_data(fund_ids, group=selected_group)
+        elif cmd == "analyze":
+            considered_months = int(cmd_args[0]) if len(cmd_args) > 0 else 2
+            analyze_all_funds(fund_ids, considered_months, group=selected_group)
+        elif cmd == "average":
             # average across all funds including zeros
-            calculate_fund_averages(fund_ids, average_by_holders=False)
+            calculate_fund_averages(fund_ids, average_by_holders=False, group=selected_group)
             # run comparison using same averaging mode (defaults to prev->curr months)
             try:
-                df = compare_months(None, None, fund_ids, average_by_holders=False)
+                df = compare_months(None, None, fund_ids, average_by_holders=False, group=selected_group)
                 print(df.head(10).to_string(index=False))
             except Exception as e:
                 print(f"Comparison failed: {e}")
-        elif sys.argv[1] == "average_non_zero":
+        elif cmd == "average_non_zero":
             # average only across funds that hold the stock
-            calculate_fund_averages(fund_ids, average_by_holders=True)
+            calculate_fund_averages(fund_ids, average_by_holders=True, group=selected_group)
             # run comparison using same averaging mode
             try:
-                df = compare_months(None, None, fund_ids, average_by_holders=True)
+                df = compare_months(None, None, fund_ids, average_by_holders=True, group=selected_group)
                 print(df.head(10).to_string(index=False))
             except Exception as e:
                 print(f"Comparison failed: {e}")
-        elif sys.argv[1] == "avg_compare":
-            # avg_compare behavior:
-            # - No args: compare previous month -> current month (based on today)
-            # - One arg: treat it as current month, compare (current-1) -> current
-            # - Two args: treat as <prev> <curr>
-            # Month formats accepted: 'YYYY-MM' or numeric month (e.g., 9 or 09) which uses current year
-            def _parse_month_arg(a):
-                # return 'YYYY-MM' string
-                a = str(a)
-                if '-' in a and len(a.split('-')[0]) == 4:
-                    return a
-                try:
-                    m = int(a)
-                    today = _dt.date.today()
-                    year = today.year
-                    return f"{year}-{m:02d}"
-                except Exception:
-                    raise ValueError(f"Invalid month argument: {a}")
-
-            # Pass raw args (or None) to compare_months which will compute defaults
+        elif cmd == "avg_compare":
             # support optional mode flag: --by-holders to average only non-zero holders
             prev_arg = None
             curr_arg = None
             average_by_holders = False
-            args = sys.argv[2:]
+            cargs = cmd_args[:]
             # parse flags at end
-            if '--by-holders' in args:
+            if '--by-holders' in cargs:
                 average_by_holders = True
-                args = [a for a in args if a != '--by-holders']
-            if len(args) >= 1:
-                prev_arg = args[0]
-            if len(args) >= 2:
-                curr_arg = args[1]
+                cargs = [a for a in cargs if a != '--by-holders']
+            if len(cargs) >= 1:
+                prev_arg = cargs[0]
+            if len(cargs) >= 2:
+                curr_arg = cargs[1]
             try:
-                df = compare_months(prev_arg, curr_arg, fund_ids, average_by_holders=average_by_holders)
+                df = compare_months(prev_arg, curr_arg, fund_ids, average_by_holders=average_by_holders, group=selected_group)
                 print(df.head(10).to_string(index=False))
             except Exception as e:
                 print(f"Error: {e}\nUsage examples:\n  python3 main.py avg_compare\n  python3 main.py avg_compare 9 10\n  python3 main.py avg_compare 2025-09 2025-10\n  python3 main.py avg_compare --by-holders\n  python3 main.py avg_compare 9 10 --by-holders")

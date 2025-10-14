@@ -14,11 +14,18 @@ def max_abs_change(row, fund_trend_matrix):
     else:
         return row['share_change']
     
-def record_immediate_sells(fund_id, stock_name, shares_change, action_type):
-    """Record immediate sells/exits to a separate file"""
+def record_immediate_sells(fund_id, stock_name, shares_change, action_type, analysis_dir=None):
+    """Record immediate sells/exits to a separate file.
+
+    Writes the file under the provided analysis_dir when given, otherwise falls back
+    to the legacy "fund_data/analysis" path.
+    """
     date_str = dt.datetime.now().strftime("%Y-%m-%d")
-    immediate_sells_file = os.path.join("fund_data", "analysis", "immediate_sells.csv")
-    
+    if analysis_dir:
+        immediate_sells_file = os.path.join(analysis_dir, "immediate_sells.csv")
+    else:
+        immediate_sells_file = os.path.join("fund_data", "analysis", "immediate_sells.csv")
+
     # Create DataFrame for new entry
     new_entry = pd.DataFrame({
         'date': [date_str],
@@ -27,17 +34,21 @@ def record_immediate_sells(fund_id, stock_name, shares_change, action_type):
         'action': [action_type],
         'shares_change': [abs(shares_change)]
     })
-    
+
     # Append or create file
     if os.path.exists(immediate_sells_file):
-        existing_data = pd.read_csv(immediate_sells_file)
-        updated_data = pd.concat([existing_data, new_entry], ignore_index=True)
+        try:
+            existing_data = pd.read_csv(immediate_sells_file)
+            updated_data = pd.concat([existing_data, new_entry], ignore_index=True)
+        except Exception:
+            # If file is corrupted or unreadable, overwrite
+            updated_data = new_entry
     else:
         updated_data = new_entry
-    
+
     updated_data.to_csv(immediate_sells_file, index=False)
   
-def analyze_monthly_trends(holdings_list):
+def analyze_monthly_trends(holdings_list, analysis_dir=None):
     """
     Analyze month-to-month trends for each stock using share count
     Args:
@@ -87,11 +98,14 @@ def analyze_monthly_trends(holdings_list):
             if curr_shares < nxt_shares:
                 action_type = 'decrease' if curr_shares > 0 else 'exit'
                 shares_change = nxt_shares - curr_shares
+                # record to the provided analysis_dir when available so group runs don't
+                # write into the global analysis folder
                 record_immediate_sells(
                     fund_id=holdings_list[i]['fund_id'].iloc[0],
                     stock_name=stock,
                     shares_change=shares_change,
-                    action_type=action_type
+                    action_type=action_type,
+                    analysis_dir=analysis_dir
                 )
             
             
@@ -117,9 +131,9 @@ def analyze_monthly_trends(holdings_list):
     
     return trend_matrix
 
-def analyze_all_funds(fund_ids, considered_months):
+def analyze_all_funds(fund_ids, considered_months, group=None):
     """Analyze holdings changes for all funds using share-based analysis"""
-    dirs = create_directory_structure()
+    dirs = create_directory_structure(group=group)
     dateTime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     # Store individual fund trends and consolidated trends
@@ -154,8 +168,9 @@ def analyze_all_funds(fund_ids, considered_months):
                 df['date'] = file.split('_')[1].split('.')[0]
                 holdings_list.append(df)
 
-            # Calculate trend matrix for this fund
-            fund_trend_matrix = analyze_monthly_trends(holdings_list)
+            # Calculate trend matrix for this fund (pass analysis dir so temporary logs
+            # like immediate_sells go into the group's analysis folder)
+            fund_trend_matrix = analyze_monthly_trends(holdings_list, analysis_dir=dirs.get('analysis'))
             fund_trends[fund_id] = fund_trend_matrix
 
             # Update consolidated trends
