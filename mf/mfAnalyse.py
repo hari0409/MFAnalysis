@@ -67,7 +67,9 @@ def analyze_monthly_trends(holdings_list, analysis_dir=None):
             'trend_score': pd.Series(dtype='float64'),
             'appearances': pd.Series(dtype='int64'),
             'current_shares': pd.Series(dtype='float64'),
-            'share_change': pd.Series(dtype='float64')
+            'share_change': pd.Series(dtype='float64'),
+            'newly_entered': pd.Series(dtype='bool'),
+            'exited': pd.Series(dtype='bool')
         }
     )
     
@@ -76,6 +78,11 @@ def analyze_monthly_trends(holdings_list, analysis_dir=None):
     trend_matrix['appearances'] = 0
     trend_matrix['current_shares'] = 0.0
     trend_matrix['share_change'] = 0.0
+    trend_matrix['newly_entered'] = False
+    trend_matrix['exited'] = False
+    
+    # Track which stocks appear in any month (to count appearances per fund once)
+    stocks_in_any_month = set()
     
     # For each consecutive month pair
     for i in range(len(holdings_list) - 1):
@@ -108,10 +115,19 @@ def analyze_monthly_trends(holdings_list, analysis_dir=None):
                     analysis_dir=analysis_dir
                 )
             
+            # Track if stock is newly entered (held in current month but not in next/older month)
+            # newly_entered means curr_shares > 0 but nxt_shares == 0 (came in from older to newer)
+            if curr_shares > 0 and nxt_shares == 0:
+                trend_matrix.loc[stock, 'newly_entered'] = True
             
-            # Update appearances count
+            # Track if stock is exited (held in next/older month but not in current/newer month)
+            # exited means curr_shares == 0 but nxt_shares > 0 (went out from newer to older)
+            if curr_shares == 0 and nxt_shares > 0:
+                trend_matrix.loc[stock, 'exited'] = True
+            
+            # Track if stock appears in any month (for this fund)
             if curr_shares > 0 or nxt_shares > 0:
-                trend_matrix.loc[stock, 'appearances'] += 1
+                stocks_in_any_month.add(stock)
 
             # Update trend score by direction of change between months
             # (curr_shares is from the newer month, nxt_shares is from the older month)
@@ -129,12 +145,20 @@ def analyze_monthly_trends(holdings_list, analysis_dir=None):
                     change_pct = ((curr_shares - nxt_shares) / nxt_shares * 100)
                     trend_matrix.loc[stock, 'share_change'] = change_pct
     
+    # Set appearances to 1 if stock was held in any month (per-fund count, not per-month)
+    for stock in stocks_in_any_month:
+        trend_matrix.loc[stock, 'appearances'] = 1
+    
     return trend_matrix
 
-def analyze_all_funds(fund_ids, considered_months, group=None):
+def analyze_all_funds(fund_ids, considered_months, group=None, fund_name_map=None):
     """Analyze holdings changes for all funds using share-based analysis"""
     dirs = create_directory_structure(group=group)
     dateTime = dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Initialize fund_name_map if not provided
+    if fund_name_map is None:
+        fund_name_map = {fund_id: fund_id for fund_id in fund_ids}
 
     # Store individual fund trends and consolidated trends
     fund_trends = {}
@@ -181,28 +205,41 @@ def analyze_all_funds(fund_ids, considered_months, group=None):
                 funds_col = []
                 funds_entered_col = []
                 funds_exited_col = []
+                funds_entered_count = []
+                funds_exited_count = []
                 for stock in consolidated_trends.index:
                     ts = consolidated_trends.at[stock, 'trend_score']
                     ap = consolidated_trends.at[stock, 'appearances']
+                    newly_entered = consolidated_trends.at[stock, 'newly_entered']
+                    exited = consolidated_trends.at[stock, 'exited']
+                    
                     if (ts != 0) or (ap != 0):
-                        funds_col.append(set([fund_id]))
+                        funds_col.append(set([fund_name_map.get(fund_id, fund_id)]))
                     else:
                         funds_col.append(set())
 
-                    # classify entered vs exited by sign of trend_score
-                    if ts > 0:
-                        funds_entered_col.append(set([fund_id]))
+                    # classify entered vs exited by newly_entered flag (new entry, not share increase)
+                    if newly_entered:
+                        funds_entered_col.append(set([fund_name_map.get(fund_id, fund_id)]))
+                        funds_entered_count.append(1)
                     else:
                         funds_entered_col.append(set())
+                        funds_entered_count.append(0)
 
-                    if ts < 0:
-                        funds_exited_col.append(set([fund_id]))
+                    if exited:
+                        funds_exited_col.append(set([fund_name_map.get(fund_id, fund_id)]))
+                        funds_exited_count.append(1)
                     else:
                         funds_exited_col.append(set())
+                        funds_exited_count.append(0)
 
                 consolidated_trends['funds'] = funds_col
                 consolidated_trends['funds_entered'] = funds_entered_col
                 consolidated_trends['funds_exited'] = funds_exited_col
+                # Initialize entered/exited counts
+                consolidated_trends['funds_entered_count'] = funds_entered_count
+                consolidated_trends['funds_exited_count'] = funds_exited_count
+                
                 # initialize counts for averaging current_shares and share_change
                 # count a fund for a stock if that fund had appearances > 0 for that stock
                 cs_count = []
@@ -219,6 +256,8 @@ def analyze_all_funds(fund_ids, considered_months, group=None):
                     sc_count.append(1 if abs(sc_val) > 0 else 0)
                 consolidated_trends['current_shares_count'] = cs_count
                 consolidated_trends['share_change_count'] = sc_count
+                # Use entered count as trend_score: count of funds that newly entered
+                consolidated_trends['trend_score'] = funds_entered_count
             else:
                 # Add new stocks to consolidated trends
                 new_stocks = set(fund_trend_matrix.index) - set(consolidated_trends.index)
@@ -236,6 +275,8 @@ def analyze_all_funds(fund_ids, considered_months, group=None):
                     # initialize counts for averaging
                     new_rows['current_shares_count'] = [0 for _ in range(len(new_rows))]
                     new_rows['share_change_count'] = [0 for _ in range(len(new_rows))]
+                    new_rows['funds_entered_count'] = [0 for _ in range(len(new_rows))]
+                    new_rows['funds_exited_count'] = [0 for _ in range(len(new_rows))]
                     # Ensure dtype compatibility for numeric columns
                     for col in new_rows.columns:
                         if col not in ('funds', 'funds_entered', 'funds_exited'):
@@ -256,14 +297,15 @@ def analyze_all_funds(fund_ids, considered_months, group=None):
                     missing_rows['funds_exited'] = [set() for _ in range(len(missing_rows))]
                     missing_rows['current_shares_count'] = [0 for _ in range(len(missing_rows))]
                     missing_rows['share_change_count'] = [0 for _ in range(len(missing_rows))]
+                    missing_rows['funds_entered_count'] = [0 for _ in range(len(missing_rows))]
+                    missing_rows['funds_exited_count'] = [0 for _ in range(len(missing_rows))]
                     for col in missing_rows.columns:
                         if col not in ('funds', 'funds_entered', 'funds_exited'):
                             missing_rows[col] = missing_rows[col].astype(consolidated_trends[col].dtype)
                     fund_trend_matrix = pd.concat([fund_trend_matrix, missing_rows])
 
                 # Update consolidated metrics
-                # Update aggregated numeric metrics
-                consolidated_trends['trend_score'] += fund_trend_matrix['trend_score']
+                # Update aggregated numeric metrics (appearances is now per-fund count)
                 consolidated_trends['appearances'] += fund_trend_matrix['appearances']
 
                 # For current_shares and share_change, compute incremental averages across funds
@@ -306,8 +348,12 @@ def analyze_all_funds(fund_ids, considered_months, group=None):
 
                     # If this fund contributed to trend_score or appearances, add it to the funds set and classify entered/exited
                     try:
-                        contributed = (fund_trend_matrix.at[stock, 'trend_score'] != 0) or (fund_trend_matrix.at[stock, 'appearances'] != 0)
+                        fund_newly_entered = bool(fund_trend_matrix.at[stock, 'newly_entered'])
+                        fund_exited = bool(fund_trend_matrix.at[stock, 'exited'])
+                        contributed = (fund_newly_entered or fund_exited) or (fund_trend_matrix.at[stock, 'appearances'] != 0)
                     except Exception:
+                        fund_newly_entered = False
+                        fund_exited = False
                         contributed = False
                     if contributed:
                         # ensure the columns exist and are sets
@@ -318,23 +364,32 @@ def analyze_all_funds(fund_ids, considered_months, group=None):
                         if not isinstance(consolidated_trends.at[stock, 'funds'], set):
                             existing_val = consolidated_trends.at[stock, 'funds']
                             consolidated_trends.at[stock, 'funds'] = set(existing_val) if existing_val else set()
-                        consolidated_trends.at[stock, 'funds'].add(fund_id)
+                        consolidated_trends.at[stock, 'funds'].add(fund_name_map.get(fund_id, fund_id))
 
-                        # classify entered vs exited by the sign of the fund's trend_score for this stock
-                        try:
-                            sc = float(fund_trend_matrix.at[stock, 'trend_score'])
-                        except Exception:
-                            sc = 0.0
-                        if sc > 0:
+                        # classify entered vs exited by the newly_entered/exited flags
+                        if fund_newly_entered:
                             if not isinstance(consolidated_trends.at[stock, 'funds_entered'], set):
                                 val = consolidated_trends.at[stock, 'funds_entered']
                                 consolidated_trends.at[stock, 'funds_entered'] = set(val) if val else set()
-                            consolidated_trends.at[stock, 'funds_entered'].add(fund_id)
-                        elif sc < 0:
+                            consolidated_trends.at[stock, 'funds_entered'].add(fund_name_map.get(fund_id, fund_id))
+                            # Increment entered count
+                            if 'funds_entered_count' not in consolidated_trends.columns:
+                                consolidated_trends['funds_entered_count'] = 0
+                            consolidated_trends.at[stock, 'funds_entered_count'] += 1
+                            
+                        if fund_exited:
                             if not isinstance(consolidated_trends.at[stock, 'funds_exited'], set):
                                 val = consolidated_trends.at[stock, 'funds_exited']
                                 consolidated_trends.at[stock, 'funds_exited'] = set(val) if val else set()
-                            consolidated_trends.at[stock, 'funds_exited'].add(fund_id)
+                            consolidated_trends.at[stock, 'funds_exited'].add(fund_name_map.get(fund_id, fund_id))
+                            # Increment exited count
+                            if 'funds_exited_count' not in consolidated_trends.columns:
+                                consolidated_trends['funds_exited_count'] = 0
+                            consolidated_trends.at[stock, 'funds_exited_count'] += 1
+
+                # Update trend_score to reflect count of funds that newly entered
+                if 'funds_entered_count' in consolidated_trends.columns:
+                    consolidated_trends['trend_score'] = consolidated_trends['funds_entered_count']
 
         except Exception as e:
             print(f"❌ Error analyzing fund {fund_id}: {str(e)}")

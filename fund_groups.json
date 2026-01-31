@@ -1,27 +1,27 @@
 {
     "small": [
-        "INF194KB1AL4",
-        "INF966L01689",
-        "INF204K01K15",
-        "INF247L01BY3",
-        "INF179KA1RZ8",
-        "INF663L01W06",
-        "INF205K013T3",
-        "INF277K011O1",
-        "INF846K01K35",
-        "INF917K01QA1"
+        {"id":"INF194KB1AL4","name":"SBI Small Cap Fund"},
+        {"id":"INF966L01689","name":"Axis Small Cap Fund"},
+        {"id":"INF204K01K15","name":"HDFC Small Cap Fund"},
+        {"id":"INF247L01BY3","name":"Kotak Small Cap Fund"},
+        {"id":"INF179KA1RZ8","name":"Mirae Small Cap Fund"},
+        {"id":"INF663L01W06","name":"Canara Robeco Small Cap Fund"},
+        {"id":"INF205K013T3","name":"Franklin Small Cap Fund"},
+        {"id":"INF277K011O1","name":"Navi Small Cap Fund"},
+        {"id":"INF846K01K35","name":"Nippon Small Cap Fund"},
+        {"id":"INF917K01QA1","name":"Motilal Oswal Small Cap Fund"}
     ],
     "mid": [],
     "large": [],
     "flexi": [
-        "INF879O01027",
-        "INF179K01UT0",
-        "INF966L01911",
-        "INF192K01CC7",
-        "INF204KC1121",
-        "INF843K01KK1",
-        "INF174K01LS2",
-        "INF959L01DT9",
-        "INF205KA1494"
+        {"id":"INF879O01027","name":"SBI Multicap Fund"},
+        {"id":"INF179K01UT0","name":"Mirae Multicap Fund"},
+        {"id":"INF966L01911","name":"Axis Growth Fund"},
+        {"id":"INF192K01CC7","name":"HDFC Balanced Fund"},
+        {"id":"INF204KC1121","name":"Reliance Growth Fund"},
+        {"id":"INF843K01KK1","name":"Canara Robeco Equity Fund"},
+        {"id":"INF174K01LS2","name":"Aditya Birla Sun Life Fund"},
+        {"id":"INF959L01DT9","name":"Nippon India Fund"},
+        {"id":"INF205KA1494","name":"Franklin Growth Fund"}
     ]
 }

@@ -11,13 +11,31 @@ if __name__ == "__main__":
     # load fund groups if present
     groups_file = 'fund_groups.json'
     group_map = {}
+    fund_name_map = {}
     try:
         import json
         if os.path.exists(groups_file):
             with open(groups_file, 'r') as gf:
-                group_map = json.load(gf)
+                raw_group_map = json.load(gf)
+                # Extract fund_ids and build name mapping
+                for group_name, funds_list in raw_group_map.items():
+                    processed_funds = []
+                    for fund in funds_list:
+                        if isinstance(fund, dict):
+                            # New format: {"id":"...", "name":"..."}
+                            fund_id = fund.get('id')
+                            fund_name = fund.get('name', fund_id)
+                            processed_funds.append(fund_id)
+                            fund_name_map[fund_id] = fund_name
+                        else:
+                            # Legacy format: just the fund ID string
+                            processed_funds.append(fund)
+                            if fund not in fund_name_map:
+                                fund_name_map[fund] = fund
+                    group_map[group_name] = processed_funds
     except Exception:
         group_map = {}
+        fund_name_map = {}
 
     import sys
     # detect if first arg is a group name
@@ -39,7 +57,7 @@ if __name__ == "__main__":
             collect_fund_data(fund_ids, group=selected_group)
         elif cmd == "analyze":
             considered_months = int(cmd_args[0]) if len(cmd_args) > 0 else 2
-            analyze_all_funds(fund_ids, considered_months, group=selected_group)
+            analyze_all_funds(fund_ids, considered_months, group=selected_group, fund_name_map=fund_name_map)
         elif cmd == "average":
             # average across all funds including zeros
             calculate_fund_averages(fund_ids, average_by_holders=False, group=selected_group)
